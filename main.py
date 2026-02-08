@@ -11,40 +11,49 @@ import threading
 api_id = 38622204
 api_hash = 'd1da3bccca8184f39121e020c9b9dd44'
 
-# ফিচার ১: মিডিয়া ফরোয়ার্ড এবং ডিলিট কনফিগারেশন
-SOURCE_GROUP_ID = -1003771970765  
-TARGET_BOT_ID = 8386204935        
+# সেশন নাম (আপনার ফাইল অনুযায়ী)
+session_name = 'Colab_session'
 
-# ফিচার ২: লিংক ফরোয়ার্ড কনফিগারেশন
+# ------------------- ফিচার ১ কনফিগারেশন (মিডিয়া ফরোয়ার্ড ও ডিলিট) -------------------
+SOURCE_GROUP_ID = -1003771970765  # যে গ্রুপ থেকে মিডিয়া আসবে এবং ডিলিট হবে
+TARGET_BOT_ID = 8386204935        # যে বটে ফরোয়ার্ড হবে
+
+# ------------------- ফিচার ২ কনফিগারেশন (লিংক ফরোয়ার্ড) -------------------
 LINK_SOURCE_GROUP_ID = -1003300886475 
 LINK_SENDER_BOT_ID = 8399054856       
 
-# পরিবর্তনযোগ্য কমান্ড ভেরিয়েবল (ডিফল্ট: !fn)
-current_reply_command = "!fn"
-
-# ফিচার ৩: সেভড মেসেজ কনফিগারেশন (আগের টার্গেট গ্রুপ)
+# ------------------- ফিচার ৩ কনফিগারেশন (সেভ ও টপিক রাউটিং) -------------------
+# সব টার্গেট গ্রুপের লিস্ট
 target_groups = [-1001166146545, -1002786332618, -1003031306912, -1002547413437, -1002573082359]
 
-# ⚠️ গুরত্বপূর্ণ: আপনার ফাইলের নাম 'Colab_session.session' তাই এখানে শুধু 'Colab_session' দেওয়া হলো
-client = TelegramClient('Colab_session', api_id, api_hash)
+# স্পেশাল টপিক ম্যাপিং (কোন গ্রুপ থেকে কোথায় যাবে)
+# ফরম্যাট: গ্রুপ_আইডি : { 'entity': 'ইউজারনেম_বা_আইডি', 'topic': টপিক_আইডি }
+TOPIC_MAPPING = {
+    -1002786332618: {'dest': 'zdcall', 'topic': 4808},
+    -1002547413437: {'dest': 'zdcall', 'topic': 4810}
+}
+
+# অটো রিপ্লাই কমান্ড ভেরিয়েবল (ডিফল্ট)
+current_reply_command = "!fn"
+
+client = TelegramClient(session_name, api_id, api_hash)
 
 # ---------------------------------------------------------
-# সার্ভার সেটআপ (Railway এর জন্য ডায়নামিক পোর্ট)
+# সার্ভার সেটআপ (Railway Keep Alive)
 # ---------------------------------------------------------
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b'Bot is Running on Railway')
+        self.wfile.write(b'Bot is Running on Railway with Topic Routing')
 
 def run_server():
-    # Railway অটোমেটিক PORT এনভায়রনমেন্ট ভেরিয়েবল সেট করে, না পেলে 8080 ব্যবহার করবে
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
     server.serve_forever()
 
 # ---------------------------------------------------------
-# ফিচার ১: কমান্ড চেঞ্জ সিস্টেম (.setcmd / .getcmd)
+# ফিচার: কমান্ড চেঞ্জ সিস্টেম (.setcmd / .getcmd)
 # ---------------------------------------------------------
 @client.on(events.NewMessage(outgoing=True, pattern=r'\.setcmd (.*)'))
 async def set_command(event):
@@ -59,23 +68,42 @@ async def get_command(event):
     await event.edit(f"ℹ️ Current Auto-reply command is: `{current_reply_command}`")
 
 # ---------------------------------------------------------
-# ফিচার ২: সেভড মেসেজ (টার্গেট গ্রুপ থেকে)
+# ফিচার: সেভড মেসেজ + টপিক রাউটিং (আপনার নতুন রিকোয়ারমেন্ট)
 # ---------------------------------------------------------
 @client.on(events.NewMessage(chats=target_groups))
-async def save_restricted_content(event):
+async def save_or_route_content(event):
     if event.media:
         try:
             chat = await event.get_chat()
+            chat_id = event.chat_id
+            
+            # মিডিয়া ডাউনলোড করা
             path = await event.download_media()
-            caption_text = f"Group: {chat.title}\n\n{event.text if event.text else ''}"
-            await client.send_file('me', path, caption=caption_text)
+            caption_text = f"Source: {chat.title}\n\n{event.text if event.text else ''}"
+
+            # লজিক চেক: এটি কি স্পেশাল গ্রুপ?
+            if chat_id in TOPIC_MAPPING:
+                # যদি স্পেশাল গ্রুপ হয়, তবে নির্দিষ্ট টপিকে পাঠানো হবে
+                dest_info = TOPIC_MAPPING[chat_id]
+                destination = dest_info['dest'] # 'zdcall'
+                topic_id = dest_info['topic']   # 4808 or 4810
+                
+                await client.send_file(destination, path, caption=caption_text, reply_to=topic_id)
+                print(f"Routed media from {chat_id} to {destination}/{topic_id}")
+            else:
+                # অন্য সব গ্রুপ হলে Saved Messages-এ যাবে
+                await client.send_file('me', path, caption=caption_text)
+                print(f"Saved media from {chat.title} to Saved Messages")
+
+            # ফাইল ডিলিট করা (স্টোরেজ সেভ করতে)
             if path and os.path.exists(path):
                 os.remove(path)
+
         except Exception as e:
-            print(f"Error saving content: {e}")
+            print(f"Error in save/route: {e}")
 
 # ---------------------------------------------------------
-# ফিচার ৩: মিডিয়া ফরোয়ার্ড এবং ডিলিট
+# ফিচার: মিডিয়া ফরোয়ার্ড এবং ডিলিট (বট ফরোয়ার্ডিং)
 # ---------------------------------------------------------
 @client.on(events.NewMessage(chats=SOURCE_GROUP_ID))
 async def forward_and_delete(event):
@@ -91,7 +119,7 @@ async def forward_and_delete(event):
             print(f"Error: {e}")
 
 # ---------------------------------------------------------
-# ফিচার ৪: লিংক ফরোয়ার্ড
+# ফিচার: লিংক ফরোয়ার্ড
 # ---------------------------------------------------------
 @client.on(events.NewMessage(chats=LINK_SOURCE_GROUP_ID))
 async def forward_bot_link(event):
@@ -104,7 +132,7 @@ async def forward_bot_link(event):
                 print(f"Error forwarding link: {e}")
 
 # ---------------------------------------------------------
-# ফিচার ৫: অটো রিপ্লাই (ডিফল্ট: !fn)
+# ফিচার: অটো রিপ্লাই (Bot Reply)
 # ---------------------------------------------------------
 @client.on(events.NewMessage(from_users=TARGET_BOT_ID))
 async def reply_fn_to_bot(event):
@@ -117,12 +145,11 @@ async def reply_fn_to_bot(event):
             print(f"Error replying: {e}")
 
 # ---------------------------------------------------------
-# মেইন ফাংশন রান করা
+# মেইন ফাংশন
 # ---------------------------------------------------------
 async def main():
-    # সেশন ফাইল থাকায় এখানে ফোন নাম্বার বা লগিন কোড চাইবে না
     await client.start()
-    print("Userbot started on Railway...")
+    print("Userbot started with Topic Routing feature...")
     await client.run_until_disconnected()
 
 # সার্ভার ব্যাকগ্রাউন্ডে চালু করা
