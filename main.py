@@ -14,26 +14,22 @@ api_hash = 'd1da3bccca8184f39121e020c9b9dd44'
 # সেশন নাম (আপনার ফাইল অনুযায়ী)
 session_name = 'Colab_session'
 
-# ------------------- ফিচার ১ কনফিগারেশন (মিডিয়া ফরোয়ার্ড ও ডিলিট) -------------------
-SOURCE_GROUP_ID = -1003771970765  # যে গ্রুপ থেকে মিডিয়া আসবে এবং ডিলিট হবে
-TARGET_BOT_ID = 8386204935        # যে বটে ফরোয়ার্ড হবে
-
-# ------------------- ফিচার ২ কনফিগারেশন (লিংক ফরোয়ার্ড) -------------------
+# ------------------- কনফিগারেশন ভেরিয়েবল -------------------
+SOURCE_GROUP_ID = -1003771970765  # মিডিয়া আসবে এবং ডিলিট হবে
+TARGET_BOT_ID = 8386204935        # ফরোয়ার্ড হবে
 LINK_SOURCE_GROUP_ID = -1003300886475 
 LINK_SENDER_BOT_ID = 8399054856       
 
-# ------------------- ফিচার ৩ কনফিগারেশন (সেভ ও টপিক রাউটিং) -------------------
-# সব টার্গেট গ্রুপের লিস্ট
+# টার্গেট গ্রুপ লিস্ট (অটো সেভ এর জন্য)
 target_groups = [-1001166146545, -1002786332618, -1003031306912, -1002547413437, -1002573082359]
 
-# স্পেশাল টপিক ম্যাপিং (কোন গ্রুপ থেকে কোথায় যাবে)
-# ফরম্যাট: গ্রুপ_আইডি : { 'entity': 'ইউজারনেম_বা_আইডি', 'topic': টপিক_আইডি }
+# অটো টপিক ম্যাপিং (অটো সেভ এর জন্য)
 TOPIC_MAPPING = {
     -1002786332618: {'dest': 'zdcall', 'topic': 4808},
     -1002547413437: {'dest': 'zdcall', 'topic': 4810}
 }
 
-# অটো রিপ্লাই কমান্ড ভেরিয়েবল (ডিফল্ট)
+# অটো রিপ্লাই কমান্ড ভেরিয়েবল (ডিফল্ট: !fn)
 current_reply_command = "!fn"
 
 client = TelegramClient(session_name, api_id, api_hash)
@@ -45,7 +41,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b'Bot is Running on Railway with Topic Routing')
+        self.wfile.write(b'Bot is Running with Manual Move Commands (/cl, /bw)')
 
 def run_server():
     port = int(os.environ.get("PORT", 8080))
@@ -53,7 +49,7 @@ def run_server():
     server.serve_forever()
 
 # ---------------------------------------------------------
-# ফিচার: কমান্ড চেঞ্জ সিস্টেম (.setcmd / .getcmd)
+# ফিচার ১: কমান্ড চেঞ্জ সিস্টেম (.setcmd / .getcmd)
 # ---------------------------------------------------------
 @client.on(events.NewMessage(outgoing=True, pattern=r'\.setcmd (.*)'))
 async def set_command(event):
@@ -68,7 +64,45 @@ async def get_command(event):
     await event.edit(f"ℹ️ Current Auto-reply command is: `{current_reply_command}`")
 
 # ---------------------------------------------------------
-# ফিচার: সেভড মেসেজ + টপিক রাউটিং (আপনার নতুন রিকোয়ারমেন্ট)
+# ফিচার ২ (নতুন): ম্যানুয়াল মুভ কমান্ড (/cl এবং /bw)
+# ---------------------------------------------------------
+@client.on(events.NewMessage(outgoing=True, pattern=r'^/(cl|bw)$'))
+async def manual_move_message(event):
+    # কমান্ড ডিটেক্ট করা (/cl নাকি /bw)
+    cmd = event.pattern_match.group(1)
+    
+    # রিপ্লাই করা মেসেজটি ধরা
+    reply_msg = await event.get_reply_message()
+    
+    if not reply_msg:
+        await event.edit("❌ Please reply to a message.")
+        return
+
+    try:
+        # গন্তব্য ঠিক করা
+        destination_group = 'zdcall'
+        topic_id = 4808 if cmd == 'cl' else 4810
+        
+        # ১. মেসেজটি নির্দিষ্ট টপিকে পাঠানো
+        if reply_msg.media:
+            await client.send_file(destination_group, reply_msg.media, caption=reply_msg.text, reply_to=topic_id)
+        else:
+            await client.send_message(destination_group, reply_msg.text, reply_to=topic_id)
+        
+        # ২. অরিজিনাল মেসেজটি ডিলিট করা
+        await reply_msg.delete()
+        
+        # ৩. আপনার কমান্ড মেসেজটিও ডিলিট করা (পরিচ্ছন্নতার জন্য)
+        await event.delete()
+        
+        print(f"Moved message to {destination_group}/{topic_id} using /{cmd}")
+
+    except Exception as e:
+        print(f"Error in manual move: {e}")
+        await event.edit(f"❌ Error: {e}")
+
+# ---------------------------------------------------------
+# ফিচার ৩: সেভড মেসেজ + অটো টপিক রাউটিং
 # ---------------------------------------------------------
 @client.on(events.NewMessage(chats=target_groups))
 async def save_or_route_content(event):
@@ -77,25 +111,20 @@ async def save_or_route_content(event):
             chat = await event.get_chat()
             chat_id = event.chat_id
             
-            # মিডিয়া ডাউনলোড করা
             path = await event.download_media()
             caption_text = f"Source: {chat.title}\n\n{event.text if event.text else ''}"
 
-            # লজিক চেক: এটি কি স্পেশাল গ্রুপ?
             if chat_id in TOPIC_MAPPING:
-                # যদি স্পেশাল গ্রুপ হয়, তবে নির্দিষ্ট টপিকে পাঠানো হবে
                 dest_info = TOPIC_MAPPING[chat_id]
-                destination = dest_info['dest'] # 'zdcall'
-                topic_id = dest_info['topic']   # 4808 or 4810
+                destination = dest_info['dest']
+                topic_id = dest_info['topic']
                 
                 await client.send_file(destination, path, caption=caption_text, reply_to=topic_id)
                 print(f"Routed media from {chat_id} to {destination}/{topic_id}")
             else:
-                # অন্য সব গ্রুপ হলে Saved Messages-এ যাবে
                 await client.send_file('me', path, caption=caption_text)
                 print(f"Saved media from {chat.title} to Saved Messages")
 
-            # ফাইল ডিলিট করা (স্টোরেজ সেভ করতে)
             if path and os.path.exists(path):
                 os.remove(path)
 
@@ -103,7 +132,7 @@ async def save_or_route_content(event):
             print(f"Error in save/route: {e}")
 
 # ---------------------------------------------------------
-# ফিচার: মিডিয়া ফরোয়ার্ড এবং ডিলিট (বট ফরোয়ার্ডিং)
+# ফিচার ৪: মিডিয়া ফরোয়ার্ড এবং ডিলিট (বট ফরোয়ার্ডিং)
 # ---------------------------------------------------------
 @client.on(events.NewMessage(chats=SOURCE_GROUP_ID))
 async def forward_and_delete(event):
@@ -119,7 +148,7 @@ async def forward_and_delete(event):
             print(f"Error: {e}")
 
 # ---------------------------------------------------------
-# ফিচার: লিংক ফরোয়ার্ড
+# ফিচার ৫: লিংক ফরোয়ার্ড
 # ---------------------------------------------------------
 @client.on(events.NewMessage(chats=LINK_SOURCE_GROUP_ID))
 async def forward_bot_link(event):
@@ -132,7 +161,7 @@ async def forward_bot_link(event):
                 print(f"Error forwarding link: {e}")
 
 # ---------------------------------------------------------
-# ফিচার: অটো রিপ্লাই (Bot Reply)
+# ফিচার ৬: অটো রিপ্লাই (Bot Reply)
 # ---------------------------------------------------------
 @client.on(events.NewMessage(from_users=TARGET_BOT_ID))
 async def reply_fn_to_bot(event):
@@ -149,10 +178,9 @@ async def reply_fn_to_bot(event):
 # ---------------------------------------------------------
 async def main():
     await client.start()
-    print("Userbot started with Topic Routing feature...")
+    print("Userbot started with ALL Features + Manual Move...")
     await client.run_until_disconnected()
 
-# সার্ভার ব্যাকগ্রাউন্ডে চালু করা
 threading.Thread(target=run_server, daemon=True).start()
 
 nest_asyncio.apply()
