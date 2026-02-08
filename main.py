@@ -16,7 +16,7 @@ session_name = 'Colab_session'
 
 # ------------------- কনফিগারেশন ভেরিয়েবল -------------------
 SOURCE_GROUP_ID = -1003771970765  # মিডিয়া আসবে এবং ডিলিট হবে
-TARGET_BOT_ID = 8386204935        # ফরোয়ার্ড হবে (এবং /zb কমান্ডের গন্তব্য)
+TARGET_BOT_ID = 8386204935        # ফরোয়ার্ড হবে
 LINK_SOURCE_GROUP_ID = -1003300886475 
 LINK_SENDER_BOT_ID = 8399054856       
 
@@ -41,7 +41,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b'Bot is Running with Custom Caption Feature')
+        self.wfile.write(b'Bot is Running with /mm Command')
 
 def run_server():
     port = int(os.environ.get("PORT", 8080))
@@ -64,17 +64,13 @@ async def get_command(event):
     await event.edit(f"ℹ️ Current Auto-reply command is: `{current_reply_command}`")
 
 # ---------------------------------------------------------
-# ফিচার ২ (আপডেটেড): ম্যানুয়াল মুভ + কাস্টম ক্যাপশন
+# ফিচার ২ (আপডেটেড): ম্যানুয়াল মুভ + কাস্টম ক্যাপশন (/cl, /bw, /zb, /mm)
 # ---------------------------------------------------------
-# প্যাটার্ন ব্যাখ্যা:
-# ^/ -> স্ল্যাশ দিয়ে শুরু
-# (cl|bw|zb) -> গ্রুপ ১: কমান্ড
-# (?:\s+(.+))?$ -> গ্রুপ ২ (অপশনাল): স্পেস এর পর যা লেখা থাকবে তাই ক্যাপশন
-@client.on(events.NewMessage(outgoing=True, pattern=r'^/(cl|bw|zb)(?:\s+(.+))?$'))
+@client.on(events.NewMessage(outgoing=True, pattern=r'^/(cl|bw|zb|mm)(?:\s+(.+))?$'))
 async def manual_move_message(event):
     # কমান্ড ডিটেক্ট করা
     cmd = event.pattern_match.group(1)
-    # কাস্টম ক্যাপশন ডিটেক্ট করা (যদি থাকে)
+    # কাস্টম ক্যাপশন ডিটেক্ট করা
     custom_caption = event.pattern_match.group(2)
     
     # রিপ্লাই করা মেসেজটি ধরা
@@ -85,30 +81,36 @@ async def manual_move_message(event):
         return
 
     try:
-        destination = None
-        topic_id = None
+        # টার্গেট লিস্ট তৈরি করা (কোথায় কোথায় পাঠাতে হবে)
+        targets = []
 
-        # গন্তব্য ঠিক করা
         if cmd == 'zb':
-            destination = TARGET_BOT_ID
-            topic_id = None 
+            # শুধু বটে যাবে
+            targets.append({'dest': TARGET_BOT_ID, 'topic': None})
         elif cmd == 'cl':
-            destination = 'zdcall'
-            topic_id = 4808
+            # শুধু টপিক 4808 এ যাবে
+            targets.append({'dest': 'zdcall', 'topic': 4808})
         elif cmd == 'bw':
-            destination = 'zdcall'
-            topic_id = 4810
-        
-        # ক্যাপশন নির্ধারণ করা: কাস্টম ক্যাপশন থাকলে সেটা, না হলে অরিজিনালটা
+            # শুধু টপিক 4810 এ যাবে
+            targets.append({'dest': 'zdcall', 'topic': 4810})
+        elif cmd == 'mm':
+            # মাল্টি মুভ: বট + টপিক 4808 দুই জায়গাতেই যাবে
+            targets.append({'dest': TARGET_BOT_ID, 'topic': None})
+            targets.append({'dest': 'zdcall', 'topic': 4808})
+
+        # ক্যাপশন নির্ধারণ করা
         final_caption = custom_caption if custom_caption else reply_msg.text
 
-        # ১. মেসেজটি নির্দিষ্ট গন্তব্যে পাঠানো
-        if reply_msg.media:
-            await client.send_file(destination, reply_msg.media, caption=final_caption, reply_to=topic_id)
-        else:
-            # যদি মিডিয়া না থাকে শুধু টেক্সট হয়
-            text_to_send = custom_caption if custom_caption else reply_msg.text
-            await client.send_message(destination, text_to_send, reply_to=topic_id)
+        # লুপ চালিয়ে সব টার্গেটে পাঠানো
+        for target in targets:
+            dest = target['dest']
+            topic = target['topic']
+            
+            if reply_msg.media:
+                await client.send_file(dest, reply_msg.media, caption=final_caption, reply_to=topic)
+            else:
+                text_to_send = final_caption if final_caption else reply_msg.text
+                await client.send_message(dest, text_to_send, reply_to=topic)
         
         # ২. অরিজিনাল মেসেজটি ডিলিট করা
         await reply_msg.delete()
@@ -116,7 +118,7 @@ async def manual_move_message(event):
         # ৩. আপনার কমান্ড মেসেজটিও ডিলিট করা
         await event.delete()
         
-        print(f"Moved via /{cmd} to {destination} with caption: {final_caption}")
+        print(f"Executed /{cmd} command successfully.")
 
     except Exception as e:
         print(f"Error in manual move: {e}")
@@ -199,7 +201,7 @@ async def reply_fn_to_bot(event):
 # ---------------------------------------------------------
 async def main():
     await client.start()
-    print("Userbot started with Custom Caption Feature...")
+    print("Userbot started with /mm (Multi-Move) Feature...")
     await client.run_until_disconnected()
 
 threading.Thread(target=run_server, daemon=True).start()
