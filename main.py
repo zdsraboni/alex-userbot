@@ -16,7 +16,7 @@ session_name = 'Colab_session'
 
 # ------------------- কনফিগারেশন ভেরিয়েবল -------------------
 SOURCE_GROUP_ID = -1003771970765  # মিডিয়া আসবে এবং ডিলিট হবে
-TARGET_BOT_ID = 8386204935        # ফরোয়ার্ড হবে
+TARGET_BOT_ID = 8386204935        # ফরোয়ার্ড হবে (এবং /zb কমান্ডের গন্তব্য)
 LINK_SOURCE_GROUP_ID = -1003300886475 
 LINK_SENDER_BOT_ID = 8399054856       
 
@@ -41,7 +41,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b'Bot is Running with Manual Move Commands (/cl, /bw)')
+        self.wfile.write(b'Bot is Running with Manual Commands (/cl, /bw, /zb)')
 
 def run_server():
     port = int(os.environ.get("PORT", 8080))
@@ -64,11 +64,11 @@ async def get_command(event):
     await event.edit(f"ℹ️ Current Auto-reply command is: `{current_reply_command}`")
 
 # ---------------------------------------------------------
-# ফিচার ২ (নতুন): ম্যানুয়াল মুভ কমান্ড (/cl এবং /bw)
+# ফিচার ২ (নতুন): ম্যানুয়াল মুভ কমান্ড (/cl, /bw, /zb)
 # ---------------------------------------------------------
-@client.on(events.NewMessage(outgoing=True, pattern=r'^/(cl|bw)$'))
+@client.on(events.NewMessage(outgoing=True, pattern=r'^/(cl|bw|zb)$'))
 async def manual_move_message(event):
-    # কমান্ড ডিটেক্ট করা (/cl নাকি /bw)
+    # কমান্ড ডিটেক্ট করা (/cl নাকি /bw নাকি /zb)
     cmd = event.pattern_match.group(1)
     
     # রিপ্লাই করা মেসেজটি ধরা
@@ -79,23 +79,36 @@ async def manual_move_message(event):
         return
 
     try:
+        destination = None
+        topic_id = None
+
         # গন্তব্য ঠিক করা
-        destination_group = 'zdcall'
-        topic_id = 4808 if cmd == 'cl' else 4810
+        if cmd == 'zb':
+            # /zb -> টার্গেট বটে (8386204935) যাবে
+            destination = TARGET_BOT_ID
+            topic_id = None # বটে টপিক আইডি লাগে না
+        elif cmd == 'cl':
+            # /cl -> zdcall গ্রুপের 4808 টপিকে যাবে
+            destination = 'zdcall'
+            topic_id = 4808
+        elif cmd == 'bw':
+            # /bw -> zdcall গ্রুপের 4810 টপিকে যাবে
+            destination = 'zdcall'
+            topic_id = 4810
         
-        # ১. মেসেজটি নির্দিষ্ট টপিকে পাঠানো
+        # ১. মেসেজটি নির্দিষ্ট গন্তব্যে পাঠানো
         if reply_msg.media:
-            await client.send_file(destination_group, reply_msg.media, caption=reply_msg.text, reply_to=topic_id)
+            await client.send_file(destination, reply_msg.media, caption=reply_msg.text, reply_to=topic_id)
         else:
-            await client.send_message(destination_group, reply_msg.text, reply_to=topic_id)
+            await client.send_message(destination, reply_msg.text, reply_to=topic_id)
         
         # ২. অরিজিনাল মেসেজটি ডিলিট করা
         await reply_msg.delete()
         
-        # ৩. আপনার কমান্ড মেসেজটিও ডিলিট করা (পরিচ্ছন্নতার জন্য)
+        # ৩. আপনার কমান্ড মেসেজটিও ডিলিট করা
         await event.delete()
         
-        print(f"Moved message to {destination_group}/{topic_id} using /{cmd}")
+        print(f"Moved message via /{cmd} to {destination}")
 
     except Exception as e:
         print(f"Error in manual move: {e}")
@@ -178,7 +191,7 @@ async def reply_fn_to_bot(event):
 # ---------------------------------------------------------
 async def main():
     await client.start()
-    print("Userbot started with ALL Features + Manual Move...")
+    print("Userbot started with ALL Features + Manual Move (/cl, /bw, /zb)...")
     await client.run_until_disconnected()
 
 threading.Thread(target=run_server, daemon=True).start()
